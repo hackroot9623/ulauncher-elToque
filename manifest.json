@@ -1,0 +1,96 @@
+{
+  "required_api_version": "^2.0.0",
+  "name": "ElToque Exchange Rates",
+  "description": "Get real-time exchange rates from ElToque for Cuban currencies",
+  "developer_name": "Hackroot",
+  "icon": "images/icon.png",
+  "options": {
+    "query_debounce": 0.1
+  },
+  "preferences": [
+    {
+      "id": "currency_keyword",
+      "type": "keyword",
+      "name": "Currency Keyword",
+      "description": "Keyword to trigger the extension",
+      "default_value": "currency"
+    },
+    {
+      "id": "api_key",
+      "type": "input",
+      "name": "API Key",
+      "description": "Your ElToque API key (required)",
+      "default_value": ""
+    },
+    {
+      "id": "usd_display",
+      "type": "input",
+      "name": "USD Display Name",
+      "description": "How USD should be displayed in the extension",
+      "default_value": "USD"
+    },
+    {
+      "id": "ecu_display",
+      "type": "input",
+      "name": "ECU Display Name",
+      "description": "How ECU should be displayed in the extension (default: EUR)",
+      "default_value": "EUR"
+    },
+    {
+      "id": "mlc_display",
+      "type": "input",
+      "name": "MLC Display Name",
+      "description": "How MLC should be displayed in the extension",
+      "default_value": "MLC"
+    },
+    {
+      "id": "trx_display",
+      "type": "input",
+      "name": "TRX Display Name",
+      "description": "How TRX should be displayed in the extension (default: TRANSFER)",
+      "default_value": "TRANSFER"
+    },
+    {
+      "id": "usdt_trc20_display",
+      "type": "input",
+      "name": "USDT_TRC20 Display Name",
+      "description": "How USDT_TRC20 should be displayed in the extension (default: USDT)",
+      "default_value": "USDT"
+    },
+    {
+      "id": "usd_icon",
+      "type": "input",
+      "name": "USD Icon Path",
+      "description": "Path to the USD currency icon (leave empty for default)",
+      "default_value": "images/usd.png"
+    },
+    {
+      "id": "ecu_icon",
+      "type": "input",
+      "name": "ECU Icon Path",
+      "description": "Path to the EUR currency icon (leave empty for default)",
+      "default_value": "images/eur.png"
+    },
+    {
+      "id": "mlc_icon",
+      "type": "input",
+      "name": "MLC Icon Path",
+      "description": "Path to the MLC currency icon (leave empty for default)",
+      "default_value": "images/mlc.png"
+    },
+    {
+      "id": "trx_icon",
+      "type": "input",
+      "name": "TRX Icon Path",
+      "description": "Path to the TRANSFER currency icon (leave empty for default)",
+      "default_value": "images/transfer.png"
+    },
+    {
+      "id": "usdt_trc20_icon",
+      "type": "input",
+      "name": "USDT_TRC20 Icon Path",
+      "description": "Path to the USDT currency icon (leave empty for default)",
+      "default_value": "images/usdt.png"
+    }
+  ]
+}
