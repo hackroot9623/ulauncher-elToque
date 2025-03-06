@@ -1,7 +1,8 @@
 # ElToque Exchange Rates
 
 Get real-time exchange rates from ElToque for Cuban currencies.
-[Kooha-2025-03-06-11-06-06.webm](https://github.com/user-attachments/assets/c2c38a0d-e589-49bd-a64e-6efd0a8c44e6)
+![Kooha-2025-03-06-11-06-06-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/2eff709f-c23d-4655-8f7e-08aab528981e)
+
 
 ## Description
 
