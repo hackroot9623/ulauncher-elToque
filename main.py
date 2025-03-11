@@ -186,7 +186,7 @@ class KeywordQueryEventListener(EventListener):
                     items.append(ExtensionResultItem(
                         icon='images/icon.png',
                         name="Invalid Trend Query",
-                        description="Please use the format: 'USD trend 7d' (supports 7d, 30d, 90d, 1y)",
+                        description="Please use the format: 'USD trend 7d' (supports 7d, 30d, 3m, 6m, 1y)",
                         on_enter=CopyToClipboardAction("Invalid Trend Query")
                     ))
                 else:
@@ -197,12 +197,12 @@ class KeywordQueryEventListener(EventListener):
                     currency = extension.currency_aliases.get(currency_input, currency_input)
                     
                     # Validate the period
-                    valid_periods = {"7d": 7, "30d": 30, "90d": 90, "1y": 365}
+                    valid_periods = {"7d": 7, "30d": 30, "3m": 90, "6m": 180, "1y": 365}
                     if period not in valid_periods:
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="Invalid Period",
-                            description="Supported periods: 7d, 30d, 90d, 1y",
+                            description="Supported periods: 7d, 30d, 3m, 6m, 1y",
                             on_enter=CopyToClipboardAction("Invalid Period")
                         ))
                     else:
@@ -218,27 +218,38 @@ class KeywordQueryEventListener(EventListener):
                                 on_enter=CopyToClipboardAction("No Trend Data Available")
                             ))
                         else:
-                            # Generate trend chart
-                            chart_path = self.generate_trend_chart(trend_data["dates"], trend_data["rates"], currency_input, period)
+                            dates = trend_data["dates"]
+                            rates = trend_data["rates"]
                             
                             # Calculate statistics
-                            current_rate = trend_data["rates"][-1] if trend_data["rates"] else 0
-                            min_rate = min(trend_data["rates"]) if trend_data["rates"] else 0
-                            max_rate = max(trend_data["rates"]) if trend_data["rates"] else 0
-                            avg_rate = sum(trend_data["rates"]) / len(trend_data["rates"]) if trend_data["rates"] else 0
+                            min_rate = min(rates)
+                            max_rate = max(rates)
+                            avg_rate = sum(rates) / len(rates)
                             
                             # Calculate change
-                            first_rate = trend_data["rates"][0] if trend_data["rates"] else 0
-                            change = current_rate - first_rate
-                            change_percent = (change / first_rate * 100) if first_rate else 0
-                            change_sign = "+" if change >= 0 else ""
+                            first_rate = rates[0]
+                            last_rate = rates[-1]
+                            change = last_rate - first_rate
+                            change_pct = (change / first_rate) * 100 if first_rate != 0 else 0
                             
-                            # Add trend summary item
+                            # Determine trend direction and icon
+                            if change > 0:
+                                trend_icon = "images/up.png"  # You'll need to add this icon
+                                trend_symbol = "↑"
+                            elif change < 0:
+                                trend_icon = "images/down.png"  # You'll need to add this icon
+                                trend_symbol = "↓"
+                            else:
+                                trend_icon = "images/flat.png"  # You'll need to add this icon
+                                trend_symbol = "→"
+                            
+                            # Add header item with trend arrow
+                            display_currency = extension.currency_names.get(currency, currency)
                             items.append(ExtensionResultItem(
-                                icon='images/icon.png',
-                                name=f"{currency_input} Trend ({period})",
-                                description=f"Current: {current_rate:.2f} CUP | Change: {change_sign}{change:.2f} ({change_sign}{change_percent:.2f}%)",
-                                on_enter=OpenAction(chart_path)
+                                icon=trend_icon,
+                                name=f"{display_currency} Trend ({period}) {trend_symbol}",
+                                description=f"Change: {change:.2f} ({change_pct:.2f}%)",
+                                on_enter=CopyToClipboardAction(f"{display_currency} Trend ({period}): Change: {change:.2f} ({change_pct:.2f}%)")
                             ))
                             
                             # Add statistics items
@@ -253,16 +264,26 @@ class KeywordQueryEventListener(EventListener):
                             items.append(ExtensionResultItem(
                                 icon=extension.currency_icons.get(currency, "images/icon.png"),
                                 name=f"Data Points: {len(trend_data['dates'])}",
-                                description=f"From {trend_data['dates'][0]} to {trend_data['dates'][-1]}",
-                                on_enter=CopyToClipboardAction(f"From {trend_data['dates'][0]} to {trend_data['dates'][-1]}")
+                                description=f"From {dates[0]} to {dates[-1]}",
+                                on_enter=CopyToClipboardAction(f"Data Points: {len(trend_data['dates'])} from {dates[0]} to {dates[-1]}")
+                            ))
+                            
+                            # Add option to generate chart
+                            items.append(ExtensionResultItem(
+                                icon="images/chart.png",
+                                name="Generate Chart",
+                                description=f"Click to generate and open a chart for {display_currency} trend",
+                                on_enter=OpenAction(self.generate_trend_chart(dates, rates, currency, period))
                             ))
             except Exception as e:
                 items.append(ExtensionResultItem(
                     icon='images/icon.png',
-                    name="Error Processing Trend",
+                    name="Error",
                     description=str(e),
                     on_enter=CopyToClipboardAction(str(e))
                 ))
+            
+            return RenderResultListAction(items)
         else:
             # Parse the query to check for date format
             target_date = datetime.now().strftime("%Y-%m-%d")  # Default to today
@@ -308,8 +329,14 @@ class KeywordQueryEventListener(EventListener):
                         ))
                     else:
                         # Check if currencies are supported (CUP is always valid)
-                        valid_from = from_currency == "CUP" or from_currency in tasas
-                        valid_to = to_currency == "CUP" or to_currency in tasas
+                        valid_from = from_currency == "CUP" 
+                        if not valid_from:
+                            valid_from = from_currency in tasas
+
+                        valid_to = to_currency == "CUP"
+                        if not valid_to:
+                            valid_to = to_currency in tasas
+
                         if not valid_from or not valid_to:
                             items.append(ExtensionResultItem(
                                 icon='images/icon.png',
@@ -959,22 +986,6 @@ class KeywordQueryEventListener(EventListener):
         plt.savefig(filename, dpi=100)
         plt.close()
         
-        # Automatically open the chart
-        try:
-            # Try to open the file with the default image viewer
-            import subprocess
-            import platform
-            
-            system = platform.system()
-            if system == 'Darwin':  # macOS
-                subprocess.Popen(['open', filename])
-            elif system == 'Linux':
-                subprocess.Popen(['xdg-open', filename])
-            elif system == 'Windows':
-                subprocess.Popen(['start', filename], shell=True)
-        except Exception as e:
-            print(f"Error opening chart: {str(e)}")
-        
         return filename
 
     def handle_history_query(self, query, extension):
@@ -1188,7 +1199,7 @@ class KeywordQueryEventListener(EventListener):
         items.append(ExtensionResultItem(
             icon='images/icon.png',
             name="Trend Analysis",
-            description="Example: 'USD trend 7d' (supports 7d, 30d, 90d, 1y)",
+            description="Example: 'USD trend 7d' (supports 7d, 30d, 3m, 6m, 1y)",
             on_enter=CopyToClipboardAction("Trend Analysis: USD trend 7d")
         ))
         
