@@ -14,6 +14,8 @@ from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.CopyToClipboardAction import CopyToClipboardAction
 from ulauncher.api.shared.action.OpenAction import OpenAction
+import matplotlib.dates as mdates
+import numpy as np
 
 # Global variables for caching
 CACHE_DURATION = 300  # Cache duration in seconds (5 minutes)
@@ -946,17 +948,56 @@ class KeywordQueryEventListener(EventListener):
         
         # Create the chart
         plt.figure(figsize=(10, 6))
-        plt.plot(dates, rates, marker='o', linestyle='-', color='#1f77b4')
+        
+        # Convert string dates to datetime objects for better handling
+        datetime_dates = [datetime.strptime(date, "%Y-%m-%d") for date in dates]
+        
+        # Plot the data
+        plt.plot(datetime_dates, rates, marker='o', linestyle='-', color='#1f77b4')
+        
+        # Set title and labels
         plt.title(f"{currency} to CUP Exchange Rate Trend ({period})")
         plt.xlabel("Date")
         plt.ylabel("Rate (CUP)")
         plt.grid(True, linestyle='--', alpha=0.7)
+        
+        # Configure x-axis date formatting based on the period
+        ax = plt.gca()
+        
+        # Determine appropriate date format and tick frequency based on period
+        if period == "7d":
+            # For 7 days, show every day with day-month format
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+        elif period == "30d":
+            # For 30 days, show every 5 days
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
+        elif period == "3m":
+            # For 3 months, show every 2 weeks
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
+        elif period == "6m":
+            # For 6 months, show monthly
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%Y'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+        elif period == "1y":
+            # For 1 year, show every 2 months
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%Y'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+        
         plt.xticks(rotation=45)
         
         # Add some visual improvements
         if len(dates) > 1:
-            # Add trend line
-            plt.plot(dates, rates, 'r--', alpha=0.3)
+            # Add trend line (using a polynomial fit for smoother line)
+            if len(dates) > 5:
+                # For longer periods, add a trend line
+                z = np.polyfit(range(len(datetime_dates)), rates, 1)
+                p = np.poly1d(z)
+                plt.plot(datetime_dates, p(range(len(datetime_dates))), 'r--', alpha=0.5, 
+                         label=f"Trend: {'+' if z[0] > 0 else ''}{z[0]:.4f} per day")
+                plt.legend()
             
             # Highlight min and max points
             min_rate = min(rates)
@@ -964,18 +1005,18 @@ class KeywordQueryEventListener(EventListener):
             min_idx = rates.index(min_rate)
             max_idx = rates.index(max_rate)
             
-            plt.plot(dates[min_idx], min_rate, 'go', markersize=10)
-            plt.plot(dates[max_idx], max_rate, 'ro', markersize=10)
+            plt.plot(datetime_dates[min_idx], min_rate, 'go', markersize=10)
+            plt.plot(datetime_dates[max_idx], max_rate, 'ro', markersize=10)
             
             # Add annotations
             plt.annotate(f"Min: {min_rate:.2f}", 
-                        (dates[min_idx], min_rate),
+                        (datetime_dates[min_idx], min_rate),
                         xytext=(10, -20),
                         textcoords="offset points",
                         arrowprops=dict(arrowstyle="->"))
             
             plt.annotate(f"Max: {max_rate:.2f}", 
-                        (dates[max_idx], max_rate),
+                        (datetime_dates[max_idx], max_rate),
                         xytext=(10, 20),
                         textcoords="offset points",
                         arrowprops=dict(arrowstyle="->"))
