@@ -46,6 +46,10 @@ Get real-time exchange rates from ElToque for Cuban currencies.
 2. Type the keyword you have set for this extension (default is `rate`).
 3. The extension will display the real-time exchange rates for Cuban currencies.
 
+## Get Help
+![image](https://github.com/user-attachments/assets/e2a45534-cb83-4cdd-bfa6-67151083da3c)
+
+
 ## Configuration
 
 You can configure the keyword for the extension in the Ulauncher preferences window.
