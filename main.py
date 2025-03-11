@@ -166,10 +166,18 @@ class KeywordQueryEventListener(EventListener):
             ))
             return RenderResultListAction(items)
             
-        # Check if the query is for database management (e.g., "db status" or "db clear")
+        # Check if the query is for help
+        if query.lower() == "help" or query.lower() == "?":
+            return self.show_help(extension)
+            
+        # Check if the query is for database management
         if query.lower().startswith("db "):
-            return self.handle_db_commands(query.lower(), extension)
-
+            return self.handle_db_commands(query, extension)
+            
+        # Check if the query is for database history lookup
+        if query.lower().startswith("history "):
+            return self.handle_history_query(query, extension)
+            
         # Check if the query is for a trend (e.g., "USD trend 7d")
         if "trend" in query.lower():
             try:
@@ -255,8 +263,6 @@ class KeywordQueryEventListener(EventListener):
                     description=str(e),
                     on_enter=CopyToClipboardAction(str(e))
                 ))
-        elif query.lower().startswith("history "):
-            return self.handle_history_query(query, extension)
         else:
             # Parse the query to check for date format
             target_date = datetime.now().strftime("%Y-%m-%d")  # Default to today
@@ -1141,6 +1147,76 @@ class KeywordQueryEventListener(EventListener):
             return True
         except ValueError:
             return False
+
+    def show_help(self, extension):
+        """Show help information about all available commands"""
+        items = []
+        
+        # Main features
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="ElToque Exchange Rates - Help",
+            description="Overview of all available commands and features",
+            on_enter=CopyToClipboardAction("ElToque Exchange Rates Help")
+        ))
+        
+        # Basic usage
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="Basic Usage",
+            description="Type the keyword alone to see current exchange rates",
+            on_enter=CopyToClipboardAction("Basic Usage: Type the keyword alone to see current exchange rates")
+        ))
+        
+        # Currency conversion
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="Currency Conversion",
+            description="Example: '100 USD to EUR' or '50 MLC to USDT'",
+            on_enter=CopyToClipboardAction("Currency Conversion: 100 USD to EUR")
+        ))
+        
+        # Historical rates
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="Historical Rates",
+            description="Example: '2024-03-01 100 USD to EUR' or 'history 2024-03-01'",
+            on_enter=CopyToClipboardAction("Historical Rates: 2024-03-01 100 USD to EUR")
+        ))
+        
+        # Trend analysis
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="Trend Analysis",
+            description="Example: 'USD trend 7d' (supports 7d, 30d, 90d, 1y)",
+            on_enter=CopyToClipboardAction("Trend Analysis: USD trend 7d")
+        ))
+        
+        # Database commands
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="Database Management",
+            description="Commands: 'db status', 'db clear', 'db backup', 'db restore', 'db rebuild'",
+            on_enter=CopyToClipboardAction("Database Management: db status")
+        ))
+        
+        # History lookup
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="History Lookup",
+            description="Example: 'history 2024-03-01' or 'history 2024-03-01 USD'",
+            on_enter=CopyToClipboardAction("History Lookup: history 2024-03-01 USD")
+        ))
+        
+        # Help command
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="Help Command",
+            description="Type 'help' or '?' to show this help information",
+            on_enter=CopyToClipboardAction("Help Command: help")
+        ))
+        
+        return RenderResultListAction(items)
 
 if __name__ == '__main__':
     ElToqueExtension().run()
