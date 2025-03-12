@@ -14,6 +14,8 @@ from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.CopyToClipboardAction import CopyToClipboardAction
 from ulauncher.api.shared.action.OpenAction import OpenAction
+import matplotlib.dates as mdates
+import numpy as np
 
 # Global variables for caching
 CACHE_DURATION = 300  # Cache duration in seconds (5 minutes)
@@ -22,8 +24,10 @@ cached_data = None
 cached_date = None  # Store the date for which data is cached
 trend_cache = {}  # Cache for trend data {currency_period: {dates: [], rates: []}}
 
-# Database configuration
-DB_PATH = os.path.expanduser("~/.local/share/ulauncher_eltoque/rates.db")
+# Default database path
+DEFAULT_DB_PATH = os.path.expanduser("~/.local/share/ulauncher/eltoque_rates.db")
+# Will be set properly when preferences are loaded
+DB_PATH = DEFAULT_DB_PATH
 
 class ElToqueExtension(Extension):
     def __init__(self):
@@ -102,8 +106,28 @@ class ElToqueExtension(Extension):
 
 class PreferencesEventListener(EventListener):
     def on_event(self, event, extension):
+        global DB_PATH
+        
         # Load preferences when the extension starts
         extension.api_key = event.preferences.get('api_key', '')
+        
+        # Set the database path if provided
+        custom_db_path = event.preferences.get('db_path', '')
+        if custom_db_path:
+            # Expand user directory if path starts with ~
+            if custom_db_path.startswith('~'):
+                custom_db_path = os.path.expanduser(custom_db_path)
+            DB_PATH = custom_db_path
+        else:
+            DB_PATH = DEFAULT_DB_PATH
+        
+        # Ensure the database directory exists
+        db_dir = os.path.dirname(DB_PATH)
+        if not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+        
+        # Initialize the database
+        self.init_database()
         
         # Load custom icons if provided
         for currency in extension.currency_icons.keys():
@@ -125,11 +149,67 @@ class PreferencesEventListener(EventListener):
             display_name = extension.currency_names[api_currency]
             extension.currency_aliases[display_name] = api_currency
 
+    def init_database(self):
+        """Initialize the database if it doesn't exist"""
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cursor = conn.cursor()
+            
+            # Create tables if they don't exist
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS rates (
+                date TEXT,
+                currency TEXT,
+                rate REAL,
+                PRIMARY KEY (date, currency)
+            )
+            ''')
+            
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            ''')
+            
+            # Commit changes and close connection
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Error initializing database: {str(e)}")
+
 class PreferencesUpdateEventListener(EventListener):
     def on_event(self, event, extension):
+        global DB_PATH
+        
         # Update the API key if it changed
         if event.id == 'api_key':
             extension.api_key = event.new_value
+        
+        # Update the database path if it changed
+        elif event.id == 'db_path':
+            old_db_path = DB_PATH
+            
+            if event.new_value:
+                # Expand user directory if path starts with ~
+                if event.new_value.startswith('~'):
+                    DB_PATH = os.path.expanduser(event.new_value)
+                else:
+                    DB_PATH = event.new_value
+            else:
+                DB_PATH = DEFAULT_DB_PATH
+            
+            # Ensure the database directory exists
+            db_dir = os.path.dirname(DB_PATH)
+            if not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
+            
+            # If the path changed, migrate data from old to new
+            if old_db_path != DB_PATH and os.path.exists(old_db_path):
+                self.migrate_database(old_db_path, DB_PATH)
+            else:
+                # Initialize the new database
+                self.init_database()
         
         # Update currency icons if they changed
         for currency in extension.currency_icons.keys():
@@ -148,6 +228,48 @@ class PreferencesUpdateEventListener(EventListener):
         for api_currency in extension.currency_names.keys():
             display_name = extension.currency_names[api_currency]
             extension.currency_aliases[display_name] = api_currency
+
+    def migrate_database(self, old_path, new_path):
+        """Migrate data from old database to new database"""
+        try:
+            # Initialize the new database
+            self.init_database()
+            
+            # Connect to both databases
+            old_conn = sqlite3.connect(old_path)
+            old_cursor = old_conn.cursor()
+            
+            new_conn = sqlite3.connect(new_path)
+            new_cursor = new_conn.cursor()
+            
+            # Copy rates data
+            old_cursor.execute("SELECT date, currency, rate FROM rates")
+            rates_data = old_cursor.fetchall()
+            
+            if rates_data:
+                new_cursor.executemany(
+                    "INSERT OR REPLACE INTO rates (date, currency, rate) VALUES (?, ?, ?)",
+                    rates_data
+                )
+            
+            # Copy metadata
+            old_cursor.execute("SELECT key, value FROM metadata")
+            metadata = old_cursor.fetchall()
+            
+            if metadata:
+                new_cursor.executemany(
+                    "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+                    metadata
+                )
+            
+            # Commit changes and close connections
+            new_conn.commit()
+            old_conn.close()
+            new_conn.close()
+            
+            print(f"Database migrated from {old_path} to {new_path}")
+        except Exception as e:
+            print(f"Error migrating database: {str(e)}")
 
 class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
@@ -861,8 +983,15 @@ class KeywordQueryEventListener(EventListener):
         
         # Initialize data structures
         all_dates = []
-        all_rates = []
+        all_rates = {}  # Changed to dictionary: {currency: [rates]}
         missing_dates = []
+        
+        # Get all supported currencies
+        supported_currencies = list(extension.currency_names.keys())
+        
+        # Initialize rates list for each currency
+        for curr in supported_currencies:
+            all_rates[curr] = []
         
         # First, get all dates in the range
         current_date = start_date
@@ -875,49 +1004,65 @@ class KeywordQueryEventListener(EventListener):
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
             
-            # Query the database for trend data
+            # Query the database for trend data for ALL currencies
             cursor.execute(
-                "SELECT date, rate FROM rates WHERE currency = ? AND date >= ? AND date <= ? ORDER BY date",
-                (currency, start_date_str, end_date.strftime("%Y-%m-%d"))
+                "SELECT date, currency, rate FROM rates WHERE date >= ? AND date <= ? ORDER BY date",
+                (start_date_str, end_date.strftime("%Y-%m-%d"))
             )
             db_results = cursor.fetchall()
             conn.close()
             
-            # Create a dictionary of existing data
-            db_data = {date: rate for date, rate in db_results}
+            # Create a dictionary of existing data: {date: {currency: rate}}
+            db_data = {}
+            for date, curr, rate in db_results:
+                if date not in db_data:
+                    db_data[date] = {}
+                db_data[date][curr] = rate
             
-            # Check which dates are missing
+            # Check which dates are missing data for any currency
             for date_str in all_dates:
-                if date_str in db_data:
-                    all_rates.append(db_data[date_str])
-                else:
-                    all_rates.append(None)  # Placeholder for missing data
+                date_has_all_currencies = True
+                
+                # Initialize with None for all currencies on this date
+                for curr in supported_currencies:
+                    if date_str in db_data and curr in db_data[date_str]:
+                        all_rates[curr].append(db_data[date_str][curr])
+                    else:
+                        all_rates[curr].append(None)
+                        date_has_all_currencies = False
+                
+                # If any currency is missing for this date, add to missing dates
+                if not date_has_all_currencies:
                     missing_dates.append(date_str)
                 
         except Exception as e:
             print(f"Database error in get_trend_data: {str(e)}")
             # If database query fails, all dates are missing
             missing_dates = all_dates
-            all_rates = [None] * len(all_dates)
+            for curr in supported_currencies:
+                all_rates[curr] = [None] * len(all_dates)
         
         # Fetch missing data from API
         if missing_dates:
-            print(f"Fetching {len(missing_dates)} missing dates from API for {currency}")
+            print(f"Fetching {len(missing_dates)} missing dates from API for all currencies")
             for date_str in missing_dates:
                 try:
                     data = self.fetch_exchange_rates(extension, date_str, force_api=True)
                     tasas = data.get("tasas", {})
                     
-                    # If we have data for this currency on this date, update our lists
-                    if currency in tasas:
+                    # Update rates for all currencies on this date
+                    if tasas:
                         idx = all_dates.index(date_str)
-                        all_rates[idx] = tasas[currency]
+                        for curr in supported_currencies:
+                            if curr in tasas:
+                                all_rates[curr][idx] = tasas[curr]
                 except Exception as e:
                     print(f"Error fetching data for {date_str}: {str(e)}")
-                    # Keep the None value for this date
+                    # Keep the None values for this date
         
+        # Process data for the requested currency
         # Remove any None values (dates with no data)
-        valid_data = [(date, rate) for date, rate in zip(all_dates, all_rates) if rate is not None]
+        valid_data = [(date, rate) for date, rate in zip(all_dates, all_rates[currency]) if rate is not None]
         
         if not valid_data:
             return {"dates": [], "rates": [], "timestamp": time.time()}
@@ -925,13 +1070,26 @@ class KeywordQueryEventListener(EventListener):
         # Unzip the valid data
         valid_dates, valid_rates = zip(*valid_data)
         
-        # Cache the result
+        # Cache the result for the requested currency
         result = {
             "dates": valid_dates,
             "rates": valid_rates,
             "timestamp": time.time()
         }
         trend_cache[cache_key] = result
+        
+        # Also cache results for other currencies while we're at it
+        for curr in supported_currencies:
+            if curr != currency:
+                curr_valid_data = [(date, rate) for date, rate in zip(all_dates, all_rates[curr]) if rate is not None]
+                if curr_valid_data:
+                    curr_valid_dates, curr_valid_rates = zip(*curr_valid_data)
+                    curr_result = {
+                        "dates": curr_valid_dates,
+                        "rates": curr_valid_rates,
+                        "timestamp": time.time()
+                    }
+                    trend_cache[f"{curr}_{period_days}"] = curr_result
         
         return result
 
@@ -946,17 +1104,56 @@ class KeywordQueryEventListener(EventListener):
         
         # Create the chart
         plt.figure(figsize=(10, 6))
-        plt.plot(dates, rates, marker='o', linestyle='-', color='#1f77b4')
+        
+        # Convert string dates to datetime objects for better handling
+        datetime_dates = [datetime.strptime(date, "%Y-%m-%d") for date in dates]
+        
+        # Plot the data
+        plt.plot(datetime_dates, rates, marker='o', linestyle='-', color='#1f77b4')
+        
+        # Set title and labels
         plt.title(f"{currency} to CUP Exchange Rate Trend ({period})")
         plt.xlabel("Date")
         plt.ylabel("Rate (CUP)")
         plt.grid(True, linestyle='--', alpha=0.7)
+        
+        # Configure x-axis date formatting based on the period
+        ax = plt.gca()
+        
+        # Determine appropriate date format and tick frequency based on period
+        if period == "7d":
+            # For 7 days, show every day with day-month format
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+        elif period == "30d":
+            # For 30 days, show every 5 days
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
+        elif period == "3m":
+            # For 3 months, show every 2 weeks
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
+        elif period == "6m":
+            # For 6 months, show monthly
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%Y'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+        elif period == "1y":
+            # For 1 year, show every 2 months
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%Y'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+        
         plt.xticks(rotation=45)
         
         # Add some visual improvements
         if len(dates) > 1:
-            # Add trend line
-            plt.plot(dates, rates, 'r--', alpha=0.3)
+            # Add trend line (using a polynomial fit for smoother line)
+            if len(dates) > 5:
+                # For longer periods, add a trend line
+                z = np.polyfit(range(len(datetime_dates)), rates, 1)
+                p = np.poly1d(z)
+                plt.plot(datetime_dates, p(range(len(datetime_dates))), 'r--', alpha=0.5, 
+                         label=f"Trend: {'+' if z[0] > 0 else ''}{z[0]:.4f} per day")
+                plt.legend()
             
             # Highlight min and max points
             min_rate = min(rates)
@@ -964,18 +1161,18 @@ class KeywordQueryEventListener(EventListener):
             min_idx = rates.index(min_rate)
             max_idx = rates.index(max_rate)
             
-            plt.plot(dates[min_idx], min_rate, 'go', markersize=10)
-            plt.plot(dates[max_idx], max_rate, 'ro', markersize=10)
+            plt.plot(datetime_dates[min_idx], min_rate, 'go', markersize=10)
+            plt.plot(datetime_dates[max_idx], max_rate, 'ro', markersize=10)
             
             # Add annotations
             plt.annotate(f"Min: {min_rate:.2f}", 
-                        (dates[min_idx], min_rate),
+                        (datetime_dates[min_idx], min_rate),
                         xytext=(10, -20),
                         textcoords="offset points",
                         arrowprops=dict(arrowstyle="->"))
             
             plt.annotate(f"Max: {max_rate:.2f}", 
-                        (dates[max_idx], max_rate),
+                        (datetime_dates[max_idx], max_rate),
                         xytext=(10, 20),
                         textcoords="offset points",
                         arrowprops=dict(arrowstyle="->"))
@@ -1225,6 +1422,14 @@ class KeywordQueryEventListener(EventListener):
             name="Help Command",
             description="Type 'help' or '?' to show this help information",
             on_enter=CopyToClipboardAction("Help Command: help")
+        ))
+        
+        # Add this item to the help items list
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="Database Location",
+            description=f"Current database path: {DB_PATH}",
+            on_enter=CopyToClipboardAction(f"Database path: {DB_PATH}")
         ))
         
         return RenderResultListAction(items)

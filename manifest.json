@@ -91,6 +91,13 @@
       "name": "USDT_TRC20 Icon Path",
       "description": "Path to the USDT currency icon (leave empty for default)",
       "default_value": "images/usdt.png"
+    },
+    {
+      "id": "db_path",
+      "type": "input",
+      "name": "Database Path",
+      "description": "Custom path for the database file (leave empty for default)",
+      "default_value": "~/.local/share/ulauncher/eltoque_rates.db"
     }
   ]
 }
