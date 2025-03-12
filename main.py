@@ -1,12 +1,36 @@
 import json
-import requests
-import time
-from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
-import io
-import base64
 import os
 import sqlite3
+import time
+from datetime import datetime, timedelta
+
+# Try to import optional dependencies with helpful error messages
+try:
+    import requests
+except ImportError:
+    print("Error: 'requests' package is missing. Please install it with: pip install requests")
+    raise
+
+try:
+    import matplotlib.pyplot as plt
+    import matplotlib.dates as mdates
+except ImportError:
+    print("Error: 'matplotlib' package is missing. Please install it with: pip install matplotlib")
+    raise
+
+try:
+    import numpy as np
+except ImportError:
+    print("Error: 'numpy' package is missing. Please install it with: pip install numpy")
+    raise
+
+try:
+    from PIL import Image
+except ImportError:
+    print("Error: 'pillow' package is missing. Please install it with: pip install pillow")
+    raise
+
+# Import Ulauncher modules
 from ulauncher.api.client.Extension import Extension
 from ulauncher.api.client.EventListener import EventListener
 from ulauncher.api.shared.event import KeywordQueryEvent, PreferencesUpdateEvent, PreferencesEvent
@@ -14,8 +38,6 @@ from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.CopyToClipboardAction import CopyToClipboardAction
 from ulauncher.api.shared.action.OpenAction import OpenAction
-import matplotlib.dates as mdates
-import numpy as np
 
 # Global variables for caching
 CACHE_DURATION = 300  # Cache duration in seconds (5 minutes)
@@ -29,9 +51,45 @@ DEFAULT_DB_PATH = os.path.expanduser("~/.local/share/ulauncher/eltoque_rates.db"
 # Will be set properly when preferences are loaded
 DB_PATH = DEFAULT_DB_PATH
 
+def check_dependencies():
+    """Check if all required dependencies are installed"""
+    missing_deps = []
+    
+    try:
+        import requests
+    except ImportError:
+        missing_deps.append("requests")
+    
+    try:
+        import matplotlib
+    except ImportError:
+        missing_deps.append("matplotlib")
+    
+    try:
+        import numpy
+    except ImportError:
+        missing_deps.append("numpy")
+    
+    try:
+        from PIL import Image
+    except ImportError:
+        missing_deps.append("pillow")
+    
+    return missing_deps
+
 class ElToqueExtension(Extension):
     def __init__(self):
         super().__init__()
+        
+        # Check dependencies
+        missing_deps = check_dependencies()
+        if missing_deps:
+            self.dependency_error = True
+            self.missing_dependencies = missing_deps
+        else:
+            self.dependency_error = False
+            self.missing_dependencies = []
+        
         self.subscribe(KeywordQueryEvent, KeywordQueryEventListener())
         self.subscribe(PreferencesEvent, PreferencesEventListener())
         self.subscribe(PreferencesUpdateEvent, PreferencesUpdateEventListener())
@@ -275,6 +333,28 @@ class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
         global last_api_call_time, cached_data, cached_date, trend_cache
 
+        # Check for missing dependencies first
+        if extension.dependency_error:
+            items = []
+            deps_str = ", ".join(extension.missing_dependencies)
+            install_cmd = f"pip install {' '.join(extension.missing_dependencies)}"
+            
+            items.append(ExtensionResultItem(
+                icon='images/icon.png',
+                name="Missing Dependencies",
+                description=f"Please install: {deps_str}",
+                on_enter=CopyToClipboardAction(install_cmd)
+            ))
+            
+            items.append(ExtensionResultItem(
+                icon='images/icon.png',
+                name="Installation Command",
+                description=f"Click to copy: {install_cmd}",
+                on_enter=CopyToClipboardAction(install_cmd)
+            ))
+            
+            return RenderResultListAction(items)
+        
         query = event.get_argument() or ""
         items = []
 
@@ -1102,88 +1182,140 @@ class KeywordQueryEventListener(EventListener):
         # Create a unique filename
         filename = f"{temp_dir}/{currency}_{period}_{int(time.time())}.png"
         
-        # Create the chart
-        plt.figure(figsize=(10, 6))
-        
-        # Convert string dates to datetime objects for better handling
-        datetime_dates = [datetime.strptime(date, "%Y-%m-%d") for date in dates]
-        
-        # Plot the data
-        plt.plot(datetime_dates, rates, marker='o', linestyle='-', color='#1f77b4')
-        
-        # Set title and labels
-        plt.title(f"{currency} to CUP Exchange Rate Trend ({period})")
-        plt.xlabel("Date")
-        plt.ylabel("Rate (CUP)")
-        plt.grid(True, linestyle='--', alpha=0.7)
-        
-        # Configure x-axis date formatting based on the period
-        ax = plt.gca()
-        
-        # Determine appropriate date format and tick frequency based on period
-        if period == "7d":
-            # For 7 days, show every day with day-month format
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
-            ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
-        elif period == "30d":
-            # For 30 days, show every 5 days
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
-            ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
-        elif period == "3m":
-            # For 3 months, show every 2 weeks
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
-            ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
-        elif period == "6m":
-            # For 6 months, show monthly
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%Y'))
-            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
-        elif period == "1y":
-            # For 1 year, show every 2 months
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%Y'))
-            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-        
-        plt.xticks(rotation=45)
-        
-        # Add some visual improvements
-        if len(dates) > 1:
-            # Add trend line (using a polynomial fit for smoother line)
-            if len(dates) > 5:
-                # For longer periods, add a trend line
-                z = np.polyfit(range(len(datetime_dates)), rates, 1)
-                p = np.poly1d(z)
-                plt.plot(datetime_dates, p(range(len(datetime_dates))), 'r--', alpha=0.5, 
-                         label=f"Trend: {'+' if z[0] > 0 else ''}{z[0]:.4f} per day")
-                plt.legend()
+        try:
+            # Create the chart
+            plt.figure(figsize=(10, 6))
             
-            # Highlight min and max points
-            min_rate = min(rates)
-            max_rate = max(rates)
-            min_idx = rates.index(min_rate)
-            max_idx = rates.index(max_rate)
+            # Convert string dates to datetime objects for better handling
+            datetime_dates = [datetime.strptime(date, "%Y-%m-%d") for date in dates]
             
-            plt.plot(datetime_dates[min_idx], min_rate, 'go', markersize=10)
-            plt.plot(datetime_dates[max_idx], max_rate, 'ro', markersize=10)
+            # Plot the data
+            plt.plot(datetime_dates, rates, marker='o', linestyle='-', color='#1f77b4')
             
-            # Add annotations
-            plt.annotate(f"Min: {min_rate:.2f}", 
-                        (datetime_dates[min_idx], min_rate),
-                        xytext=(10, -20),
-                        textcoords="offset points",
-                        arrowprops=dict(arrowstyle="->"))
+            # Set title and labels
+            plt.title(f"{currency} to CUP Exchange Rate Trend ({period})")
+            plt.xlabel("Date")
+            plt.ylabel("Rate (CUP)")
+            plt.grid(True, linestyle='--', alpha=0.7)
             
-            plt.annotate(f"Max: {max_rate:.2f}", 
-                        (datetime_dates[max_idx], max_rate),
-                        xytext=(10, 20),
-                        textcoords="offset points",
-                        arrowprops=dict(arrowstyle="->"))
-        
-        plt.tight_layout()
-        
-        # Save the chart
-        plt.savefig(filename, dpi=100)
-        plt.close()
-        
-        return filename
+            # Configure x-axis date formatting based on the period
+            ax = plt.gca()
+            
+            # Determine appropriate date format and tick frequency based on period
+            if period == "7d":
+                # For 7 days, show every day with day-month format
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+            elif period == "30d":
+                # For 30 days, show every 5 days
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
+            elif period == "3m":
+                # For 3 months, show every 2 weeks
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%b'))
+                ax.xaxis.set_major_locator(mdates.DayLocator(interval=14))
+            elif period == "6m":
+                # For 6 months, show monthly
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%Y'))
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+            elif period == "1y":
+                # For 1 year, show every 2 months
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%b-%Y'))
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+            
+            plt.xticks(rotation=45)
+            
+            # Add some visual improvements
+            if len(dates) > 1:
+                # Add trend line (using a polynomial fit for smoother line)
+                if len(dates) > 5:
+                    # For longer periods, add a trend line
+                    z = np.polyfit(range(len(datetime_dates)), rates, 1)
+                    p = np.poly1d(z)
+                    plt.plot(datetime_dates, p(range(len(datetime_dates))), 'r--', alpha=0.5, 
+                             label=f"Trend: {'+' if z[0] > 0 else ''}{z[0]:.4f} per day")
+                    plt.legend()
+                
+                # Highlight min and max points
+                min_rate = min(rates)
+                max_rate = max(rates)
+                min_idx = rates.index(min_rate)
+                max_idx = rates.index(max_rate)
+                
+                plt.plot(datetime_dates[min_idx], min_rate, 'go', markersize=10)
+                plt.plot(datetime_dates[max_idx], max_rate, 'ro', markersize=10)
+                
+                # Add annotations
+                plt.annotate(f"Min: {min_rate:.2f}", 
+                            (datetime_dates[min_idx], min_rate),
+                            xytext=(10, -20),
+                            textcoords="offset points",
+                            arrowprops=dict(arrowstyle="->"))
+                
+                plt.annotate(f"Max: {max_rate:.2f}", 
+                            (datetime_dates[max_idx], max_rate),
+                            xytext=(10, 20),
+                            textcoords="offset points",
+                            arrowprops=dict(arrowstyle="->"))
+            
+            # Add currency icon to the top left corner
+            try:
+                from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+                from PIL import Image
+                
+                # Get the icon path for the currency
+                icon_path = "images/icon.png"  # Default icon
+                
+                # Try to find the specific currency icon
+                currency_lower = currency.lower()
+                possible_paths = [
+                    f"images/{currency_lower}.png",
+                    f"images/{currency}.png"
+                ]
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        icon_path = path
+                        break
+                
+                # Check if the icon exists
+                if os.path.exists(icon_path):
+                    # Load the image
+                    img = Image.open(icon_path)
+                    
+                    # Resize if needed (adjust size as needed)
+                    img = img.resize((64, 64), Image.LANCZOS)
+                    
+                    # Convert to array for matplotlib
+                    img_array = np.array(img)
+                    
+                    # Create an OffsetImage
+                    imagebox = OffsetImage(img_array, zoom=0.5)
+                    imagebox.image.axes = ax
+                    
+                    # Create an AnnotationBbox
+                    ab = AnnotationBbox(
+                        imagebox,
+                        (0.05, 0.95),  # Position in axes coordinates (top left)
+                        xycoords='axes fraction',
+                        frameon=False  # No border around the image
+                    )
+                    
+                    # Add the image to the plot
+                    ax.add_artist(ab)
+            except Exception as e:
+                print(f"Warning: Could not add currency icon to chart: {str(e)}")
+            
+            plt.tight_layout()
+            
+            # Save the chart
+            plt.savefig(filename, dpi=100)
+            plt.close()
+            
+            return filename
+        except Exception as e:
+            print(f"Error generating trend chart: {str(e)}")
+            # Return a placeholder or None if chart generation fails
+            return None
 
     def handle_history_query(self, query, extension):
         """Handle history queries to check rates for specific dates"""

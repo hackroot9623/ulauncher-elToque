@@ -16,29 +16,33 @@ Get real-time exchange rates from ElToque for Cuban currencies.
 
 ## Installation
 
+### Method 1: Via Ulauncher Extension Manager
+1. Open Ulauncher preferences
+2. Go to the "Extensions" tab
+3. Click "Add Extension"
+4. Paste the following URL: `https://github.com/hackroot9623/ulauncher-elToque`
+
+### Method 2: Manual Installation
 1. Clone the repository:
+   ```bash
+   git clone https://github.com/hackroot9623/ulauncher-elToque.git ~/.local/share/ulauncher/extensions/ulauncher-eltoque
+   ```
 
-    ```bash
-    git clone https://github.com/hackroot9623/ulauncher-elToque.git
-    ```
+2. Install the required dependencies:
+   ```bash
+   pip install -r ~/.local/share/ulauncher/extensions/ulauncher-eltoque/requirements.txt
+   ```
 
-2. Navigate to the cloned directory:
+3. Restart Ulauncher
 
-    ```bash
-    cd ulauncher-elToque
-    ```
-
-3. Install the required dependencies:
-
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-4. Add the extension to Ulauncher:
-
-    - Open Ulauncher preferences window.
-    - Go to the "Extensions" tab.
-    - Click on the "+" button and select the `ulauncher-elToque` directory.
+### Troubleshooting
+If you encounter errors during installation:
+1. Make sure you have the required dependencies installed:
+   ```bash
+   pip install matplotlib numpy requests pillow
+   ```
+2. Check if your Python environment has access to install packages
+3. Try installing the extension manually using Method 2 above
 
 ## Usage
 
