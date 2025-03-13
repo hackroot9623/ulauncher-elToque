@@ -38,6 +38,7 @@ from ulauncher.api.shared.item.ExtensionResultItem import ExtensionResultItem
 from ulauncher.api.shared.action.RenderResultListAction import RenderResultListAction
 from ulauncher.api.shared.action.CopyToClipboardAction import CopyToClipboardAction
 from ulauncher.api.shared.action.OpenAction import OpenAction
+from ulauncher.api.shared.action.SetUserQueryAction import SetUserQueryAction
 
 # Global variables for caching
 CACHE_DURATION = 300  # Cache duration in seconds (5 minutes)
@@ -79,20 +80,19 @@ def check_dependencies():
 
 class ElToqueExtension(Extension):
     def __init__(self):
-        super().__init__()
-        
-        # Check dependencies
-        missing_deps = check_dependencies()
-        if missing_deps:
-            self.dependency_error = True
-            self.missing_dependencies = missing_deps
-        else:
-            self.dependency_error = False
-            self.missing_dependencies = []
-        
+        super(ElToqueExtension, self).__init__()
         self.subscribe(KeywordQueryEvent, KeywordQueryEventListener())
         self.subscribe(PreferencesEvent, PreferencesEventListener())
         self.subscribe(PreferencesUpdateEvent, PreferencesUpdateEventListener())
+        
+        # Initialize dependency_error attribute
+        self.dependency_error = False
+        
+        # Ensure currency icons are available
+        self.ensure_currency_icons()
+        
+        # Check for dependencies (if any)
+        self.check_dependencies()
         
         # Default values
         self.api_key = None
@@ -126,6 +126,16 @@ class ElToqueExtension(Extension):
         
         # Initialize the database
         self.init_database()
+
+    def check_dependencies(self):
+        """Check for required dependencies and set dependency_error if any are missing"""
+        try:
+            import requests
+            import matplotlib
+            # Add other dependencies as needed
+        except ImportError as e:
+            self.dependency_error = True
+            print(f"Dependency error: {str(e)}")
 
     def init_database(self):
         """Initialize the SQLite database for storing historical rates"""
@@ -161,6 +171,40 @@ class ElToqueExtension(Extension):
         # Commit changes and close connection
         conn.commit()
         conn.close()
+
+    def ensure_currency_icons(self):
+        """Ensure all currency icons are available, downloading missing ones"""
+        # Currency to country code mapping
+        currency_map = {
+            "EUR": "eu",
+            "GBP": "gb",
+            "JPY": "jp",
+            "CAD": "ca",
+            "AUD": "au",
+            "CHF": "ch",
+            "CNY": "cn",
+            "HKD": "hk"
+        }
+        
+        for currency, country in currency_map.items():
+            icon_path = f"images/{currency.lower()}.png"
+            
+            # Skip if icon already exists
+            if os.path.exists(icon_path):
+                continue
+            
+            # Download the flag
+            try:
+                url = f"https://flagcdn.com/w80/{country}.png"
+                response = requests.get(url, timeout=5)
+                response.raise_for_status()
+                
+                # Save the icon
+                with open(icon_path, "wb") as f:
+                    f.write(response.content)
+                print(f"Downloaded icon for {currency}")
+            except Exception as e:
+                print(f"Failed to download icon for {currency}: {str(e)}")
 
 class PreferencesEventListener(EventListener):
     def on_event(self, event, extension):
@@ -331,28 +375,15 @@ class PreferencesUpdateEventListener(EventListener):
 
 class KeywordQueryEventListener(EventListener):
     def on_event(self, event, extension):
-        global last_api_call_time, cached_data, cached_date, trend_cache
-
-        # Check for missing dependencies first
+        # Check for dependency errors
         if extension.dependency_error:
             items = []
-            deps_str = ", ".join(extension.missing_dependencies)
-            install_cmd = f"pip install {' '.join(extension.missing_dependencies)}"
-            
             items.append(ExtensionResultItem(
                 icon='images/icon.png',
                 name="Missing Dependencies",
-                description=f"Please install: {deps_str}",
-                on_enter=CopyToClipboardAction(install_cmd)
+                description="Please install the required dependencies.",
+                on_enter=CopyToClipboardAction("pip install requests matplotlib")
             ))
-            
-            items.append(ExtensionResultItem(
-                icon='images/icon.png',
-                name="Installation Command",
-                description=f"Click to copy: {install_cmd}",
-                on_enter=CopyToClipboardAction(install_cmd)
-            ))
-            
             return RenderResultListAction(items)
         
         query = event.get_argument() or ""
@@ -367,19 +398,67 @@ class KeywordQueryEventListener(EventListener):
                 on_enter=CopyToClipboardAction("API Key Missing")
             ))
             return RenderResultListAction(items)
-            
+        
         # Check if the query is for help
         if query.lower() == "help" or query.lower() == "?":
             return self.show_help(extension)
+        
+        # If no query, show the three main options
+        if not query:
+            # Option 1: ElToque Rates
+            items.append(ExtensionResultItem(
+                icon='images/icon.png',
+                name="ElToque Rates",
+                description="View Cuban exchange rates from ElToque",
+                on_enter=SetUserQueryAction(f"{event.get_keyword()} eltoque")
+            ))
             
+            # Option 2: International Rates
+            items.append(ExtensionResultItem(
+                icon='images/globe.png',  # You'll need to add this icon
+                name="International Rates",
+                description="View international exchange rates via Yahoo Finance",
+                on_enter=SetUserQueryAction(f"{event.get_keyword()} international")
+            ))
+            
+            # Option 3: Compare Rates
+            items.append(ExtensionResultItem(
+                icon='images/compare.png',  # You'll need to add this icon
+                name="Compare Rates",
+                description="Compare ElToque rates with international markets",
+                on_enter=SetUserQueryAction(f"{event.get_keyword()} compare")
+            ))
+            
+            return RenderResultListAction(items)
+        
+        # Handle specific commands based on the first word
+        command = query.lower().split()[0] if query else ""
+        
+        if command == "eltoque":
+            # Handle ElToque rates (original functionality)
+            return self.handle_eltoque_rates(query[8:].strip(), extension)
+        elif command == "international":
+            # Handle international rates
+            return self.handle_international_rates(query[14:].strip(), extension)
+        elif command == "compare":
+            # Handle rate comparison
+            return self.handle_rate_comparison(query[8:].strip(), extension)
+        else:
+            # Default to ElToque rates for backward compatibility
+            return self.handle_eltoque_rates(query, extension)
+
+    def handle_eltoque_rates(self, query, extension):
+        """Handle ElToque exchange rates (original functionality)"""
+        items = []
+        
         # Check if the query is for database management
         if query.lower().startswith("db "):
             return self.handle_db_commands(query, extension)
-            
+        
         # Check if the query is for database history lookup
         if query.lower().startswith("history "):
             return self.handle_history_query(query, extension)
-            
+        
         # Check if the query is for a trend (e.g., "USD trend 7d")
         if "trend" in query.lower():
             try:
@@ -523,6 +602,7 @@ class KeywordQueryEventListener(EventListener):
                     # Extract exchange rates
                     tasas = data.get("tasas", {})
                     if not tasas:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="No data available",
@@ -540,6 +620,7 @@ class KeywordQueryEventListener(EventListener):
                             valid_to = to_currency in tasas
 
                         if not valid_from or not valid_to:
+                            items = []
                             items.append(ExtensionResultItem(
                                 icon='images/icon.png',
                                 name="Invalid Currency",
@@ -571,6 +652,7 @@ class KeywordQueryEventListener(EventListener):
                             ))
 
                 except (IndexError, ValueError):
+                    items = []
                     items.append(ExtensionResultItem(
                         icon='images/icon.png',
                         name="Invalid Input",
@@ -579,6 +661,7 @@ class KeywordQueryEventListener(EventListener):
                     ))
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 429:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="Rate Limit Exceeded",
@@ -586,6 +669,7 @@ class KeywordQueryEventListener(EventListener):
                             on_enter=CopyToClipboardAction("Rate Limit Exceeded")
                         ))
                     elif e.response.status_code == 401:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="Invalid API Key",
@@ -593,6 +677,7 @@ class KeywordQueryEventListener(EventListener):
                             on_enter=CopyToClipboardAction("Invalid API Key")
                         ))
                     else:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="API Error",
@@ -600,6 +685,7 @@ class KeywordQueryEventListener(EventListener):
                             on_enter=CopyToClipboardAction(str(e))
                         ))
                 except Exception as e:
+                    items = []
                     items.append(ExtensionResultItem(
                         icon='images/icon.png',
                         name="Error",
@@ -615,6 +701,7 @@ class KeywordQueryEventListener(EventListener):
                     # Extract exchange rates from the response
                     tasas = data.get("tasas", {})
                     if not tasas:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="No data available",
@@ -624,6 +711,7 @@ class KeywordQueryEventListener(EventListener):
                     else:
                         # Add a header item showing the date
                         if target_date != datetime.now().strftime("%Y-%m-%d"):
+                            items = []
                             items.append(ExtensionResultItem(
                                 icon='images/icon.png',
                                 name=f"Exchange Rates for {target_date}",
@@ -644,6 +732,7 @@ class KeywordQueryEventListener(EventListener):
 
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 429:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="Rate Limit Exceeded",
@@ -651,6 +740,7 @@ class KeywordQueryEventListener(EventListener):
                             on_enter=CopyToClipboardAction("Rate Limit Exceeded")
                         ))
                     elif e.response.status_code == 401:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="Invalid API Key",
@@ -658,6 +748,7 @@ class KeywordQueryEventListener(EventListener):
                             on_enter=CopyToClipboardAction("Invalid API Key")
                         ))
                     else:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="API Error",
@@ -668,6 +759,7 @@ class KeywordQueryEventListener(EventListener):
                     # Try to get data from local storage if network error
                     offline_data = self.get_rates_from_db(target_date)
                     if offline_data:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name=f"Offline Mode - {target_date}",
@@ -686,6 +778,7 @@ class KeywordQueryEventListener(EventListener):
                                 on_enter=CopyToClipboardAction(str(rate))
                             ))
                     else:
+                        items = []
                         items.append(ExtensionResultItem(
                             icon='images/icon.png',
                             name="Network Error",
@@ -693,6 +786,7 @@ class KeywordQueryEventListener(EventListener):
                             on_enter=CopyToClipboardAction(str(e))
                         ))
                 except json.JSONDecodeError as e:
+                    items = []
                     items.append(ExtensionResultItem(
                         icon='images/icon.png',
                         name="JSON Error",
@@ -700,6 +794,7 @@ class KeywordQueryEventListener(EventListener):
                         on_enter=CopyToClipboardAction(str(e))
                     ))
                 except Exception as e:
+                    items = []
                     items.append(ExtensionResultItem(
                         icon='images/icon.png',
                         name="Error",
@@ -1500,27 +1595,67 @@ class KeywordQueryEventListener(EventListener):
             on_enter=CopyToClipboardAction("ElToque Exchange Rates Help")
         ))
         
+        # Main options
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="Main Options",
+            description="ElToque Rates, International Rates, Compare",
+            on_enter=CopyToClipboardAction("Main Options")
+        ))
+        
+        # ElToque Rates
+        items.append(ExtensionResultItem(
+            icon='images/icon.png',
+            name="ElToque Rates",
+            description="View Cuban exchange rates from ElToque",
+            on_enter=CopyToClipboardAction("ElToque Rates")
+        ))
+        
+        # International Rates
+        items.append(ExtensionResultItem(
+            icon='images/globe.png',
+            name="International Rates",
+            description="View international exchange rates",
+            on_enter=CopyToClipboardAction("International Rates")
+        ))
+        
+        # Compare Rates
+        items.append(ExtensionResultItem(
+            icon='images/compare.png',
+            name="Compare Rates",
+            description="Compare ElToque rates with international markets",
+            on_enter=CopyToClipboardAction("Compare Rates")
+        ))
+        
         # Basic usage
         items.append(ExtensionResultItem(
             icon='images/icon.png',
             name="Basic Usage",
-            description="Type the keyword alone to see current exchange rates",
-            on_enter=CopyToClipboardAction("Basic Usage: Type the keyword alone to see current exchange rates")
+            description="Type the keyword alone to see the main options",
+            on_enter=CopyToClipboardAction("Basic Usage: Type the keyword alone to see the main options")
         ))
         
-        # Currency conversion
+        # ElToque currency conversion
         items.append(ExtensionResultItem(
             icon='images/icon.png',
-            name="Currency Conversion",
-            description="Example: '100 USD to EUR' or '50 MLC to USDT'",
-            on_enter=CopyToClipboardAction("Currency Conversion: 100 USD to EUR")
+            name="ElToque Currency Conversion",
+            description="Example: 'eltoque 100 USD to EUR' or '100 USD to EUR'",
+            on_enter=CopyToClipboardAction("ElToque Currency Conversion: 100 USD to EUR")
+        ))
+        
+        # International currency conversion
+        items.append(ExtensionResultItem(
+            icon='images/globe.png',
+            name="International Currency Conversion",
+            description="Example: 'international 100 USD to EUR'",
+            on_enter=CopyToClipboardAction("International Currency Conversion: international 100 USD to EUR")
         ))
         
         # Historical rates
         items.append(ExtensionResultItem(
             icon='images/icon.png',
             name="Historical Rates",
-            description="Example: '2024-03-01 100 USD to EUR' or 'history 2024-03-01'",
+            description="Example: 'eltoque 2024-03-01 100 USD to EUR' or 'history 2024-03-01'",
             on_enter=CopyToClipboardAction("Historical Rates: 2024-03-01 100 USD to EUR")
         ))
         
@@ -1528,7 +1663,7 @@ class KeywordQueryEventListener(EventListener):
         items.append(ExtensionResultItem(
             icon='images/icon.png',
             name="Trend Analysis",
-            description="Example: 'USD trend 7d' (supports 7d, 30d, 3m, 6m, 1y)",
+            description="Example: 'eltoque USD trend 7d' or 'international EUR trend 30d'",
             on_enter=CopyToClipboardAction("Trend Analysis: USD trend 7d")
         ))
         
@@ -1540,29 +1675,441 @@ class KeywordQueryEventListener(EventListener):
             on_enter=CopyToClipboardAction("Database Management: db status")
         ))
         
-        # History lookup
+        # Compare specific currency
         items.append(ExtensionResultItem(
-            icon='images/icon.png',
-            name="History Lookup",
-            description="Example: 'history 2024-03-01' or 'history 2024-03-01 USD'",
-            on_enter=CopyToClipboardAction("History Lookup: history 2024-03-01 USD")
+            icon='images/compare.png',
+            name="Compare Specific Currency",
+            description="Example: 'compare EUR' to compare only EUR rates",
+            on_enter=CopyToClipboardAction("Compare Specific Currency: compare EUR")
         ))
         
-        # Help command
-        items.append(ExtensionResultItem(
-            icon='images/icon.png',
-            name="Help Command",
-            description="Type 'help' or '?' to show this help information",
-            on_enter=CopyToClipboardAction("Help Command: help")
-        ))
-        
-        # Add this item to the help items list
+        # Add database location
         items.append(ExtensionResultItem(
             icon='images/icon.png',
             name="Database Location",
             description=f"Current database path: {DB_PATH}",
             on_enter=CopyToClipboardAction(f"Database path: {DB_PATH}")
         ))
+        
+        return RenderResultListAction(items)
+
+    def handle_international_rates(self, query, extension):
+        """Handle international exchange rates"""
+        items = []
+        
+        try:
+            # Check if the query is for a trend
+            if "trend" in query.lower():
+                return self.handle_international_trend(query, extension)
+            
+            # Parse the query to check for conversion
+            if "to" in query.lower():
+                return self.handle_international_conversion(query, extension)
+            
+            # Default: show major international currencies
+            rates = self.fetch_international_rates()
+            
+            if not rates:
+                items.append(ExtensionResultItem(
+                    icon='images/globe.png',
+                    name="No International Data Available",
+                    description="Could not fetch international exchange rates.",
+                    on_enter=CopyToClipboardAction("No International Data Available")
+                ))
+            else:
+                # Add header
+                items.append(ExtensionResultItem(
+                    icon='images/globe.png',
+                    name="International Exchange Rates",
+                    description=f"Base currency: USD - {datetime.now().strftime('%Y-%m-%d')}",
+                    on_enter=CopyToClipboardAction("International Exchange Rates")
+                ))
+                
+                # Add major currencies
+                major_currencies = ["EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "HKD"]
+                for currency in major_currencies:
+                    if currency in rates:
+                        rate = rates[currency]
+                        
+                        # Check for currency icon
+                        icon_path = f"images/{currency.lower()}.png"
+                        if not os.path.exists(icon_path):
+                            icon_path = "images/globe.png"  # Default icon
+                        
+                        items.append(ExtensionResultItem(
+                            icon=icon_path,
+                            name=f"{currency}: {rate:.4f}",
+                            description=f"1 USD = {rate:.4f} {currency}",
+                            on_enter=CopyToClipboardAction(str(rate))
+                        ))
+        except Exception as e:
+            items.append(ExtensionResultItem(
+                icon='images/globe.png',
+                name="Error",
+                description=str(e),
+                on_enter=CopyToClipboardAction(str(e))
+            ))
+        
+        return RenderResultListAction(items)
+
+    def handle_international_conversion(self, query, extension):
+        """Handle international currency conversion"""
+        items = []
+        
+        try:
+            # Parse the input (e.g., "100 USD to EUR")
+            parts = query.lower().split()
+            amount = float(parts[0])  # Extract the amount
+            from_currency = parts[1].upper()  # Extract the source currency
+            to_currency = parts[3].upper()  # Extract the target currency
+            
+            # Fetch exchange rates
+            rates = self.fetch_international_rates()
+            
+            if not rates:
+                items.append(ExtensionResultItem(
+                    icon='images/globe.png',
+                    name="No International Data Available",
+                    description="Could not fetch international exchange rates.",
+                    on_enter=CopyToClipboardAction("No International Data Available")
+                ))
+            else:
+                # Calculate conversion
+                result = self.convert_international_currency(amount, from_currency, to_currency, rates)
+                
+                # Display the result
+                items.append(ExtensionResultItem(
+                    icon='images/globe.png',
+                    name=f"{amount} {from_currency} = {result:.2f} {to_currency}",
+                    description=f"International market rate",
+                    on_enter=CopyToClipboardAction(str(result))
+                ))
+        except (IndexError, ValueError):
+            items.append(ExtensionResultItem(
+                icon='images/globe.png',
+                name="Invalid Input",
+                description="Please use the format: '100 USD to EUR'",
+                on_enter=CopyToClipboardAction("Invalid Input")
+            ))
+        except Exception as e:
+            items.append(ExtensionResultItem(
+                icon='images/globe.png',
+                name="Error",
+                description=str(e),
+                on_enter=CopyToClipboardAction(str(e))
+            ))
+        
+        return RenderResultListAction(items)
+
+    def handle_international_trend(self, query, extension):
+        """Handle international currency trend analysis"""
+        items = []
+        
+        try:
+            parts = query.lower().split()
+            if len(parts) < 3:
+                items.append(ExtensionResultItem(
+                    icon='images/globe.png',
+                    name="Invalid Trend Query",
+                    description="Please use the format: 'EUR trend 7d' (supports 7d, 30d, 3m, 6m, 1y)",
+                    on_enter=CopyToClipboardAction("Invalid Trend Query")
+                ))
+            else:
+                currency = parts[0].upper()
+                period = parts[2].lower()
+                
+                # Validate the period
+                valid_periods = {"7d": 7, "30d": 30, "3m": 90, "6m": 180, "1y": 365}
+                if period not in valid_periods:
+                    items.append(ExtensionResultItem(
+                        icon='images/globe.png',
+                        name="Invalid Period",
+                        description="Supported periods: 7d, 30d, 3m, 6m, 1y",
+                        on_enter=CopyToClipboardAction("Invalid Period")
+                    ))
+                else:
+                    # Get trend data
+                    days = valid_periods[period]
+                    trend_data = self.get_international_trend_data(currency, days)
+                    
+                    if not trend_data or len(trend_data["dates"]) == 0:
+                        items.append(ExtensionResultItem(
+                            icon='images/globe.png',
+                            name="No Trend Data Available",
+                            description=f"Could not retrieve trend data for {currency} over {period}",
+                            on_enter=CopyToClipboardAction("No Trend Data Available")
+                        ))
+                    else:
+                        # Process and display trend data (similar to the original trend code)
+                        dates = trend_data["dates"]
+                        rates = trend_data["rates"]
+                        
+                        # Calculate statistics
+                        min_rate = min(rates)
+                        max_rate = max(rates)
+                        avg_rate = sum(rates) / len(rates)
+                        
+                        # Calculate change
+                        first_rate = rates[0]
+                        last_rate = rates[-1]
+                        change = last_rate - first_rate
+                        change_pct = (change / first_rate) * 100 if first_rate != 0 else 0
+                        
+                        # Determine trend direction and icon
+                        if change > 0:
+                            trend_icon = "images/up.png"
+                            trend_symbol = "↑"
+                        elif change < 0:
+                            trend_icon = "images/down.png"
+                            trend_symbol = "↓"
+                        else:
+                            trend_icon = "images/flat.png"
+                            trend_symbol = "→"
+                        
+                        # Add header item with trend arrow
+                        items.append(ExtensionResultItem(
+                            icon=trend_icon,
+                            name=f"{currency} Trend ({period}) {trend_symbol}",
+                            description=f"Change: {change:.4f} ({change_pct:.2f}%)",
+                            on_enter=CopyToClipboardAction(f"{currency} Trend ({period}): Change: {change:.4f} ({change_pct:.2f}%)")
+                        ))
+                        
+                        # Add statistics items
+                        items.append(ExtensionResultItem(
+                            icon='images/globe.png',
+                            name=f"Statistics for {period}",
+                            description=f"Min: {min_rate:.4f} | Max: {max_rate:.4f} | Avg: {avg_rate:.4f}",
+                            on_enter=CopyToClipboardAction(f"Min: {min_rate:.4f} | Max: {max_rate:.4f} | Avg: {avg_rate:.4f}")
+                        ))
+                        
+                        # Add data points item
+                        items.append(ExtensionResultItem(
+                            icon='images/globe.png',
+                            name=f"Data Points: {len(trend_data['dates'])}",
+                            description=f"From {dates[0]} to {dates[-1]}",
+                            on_enter=CopyToClipboardAction(f"Data Points: {len(trend_data['dates'])} from {dates[0]} to {dates[-1]}")
+                        ))
+                        
+                        # Add option to generate chart
+                        items.append(ExtensionResultItem(
+                            icon="images/chart.png",
+                            name="Generate Chart",
+                            description=f"Click to generate and open a chart for {currency} trend",
+                            on_enter=OpenAction(self.generate_international_trend_chart(dates, rates, currency, period))
+                        ))
+        except Exception as e:
+            items.append(ExtensionResultItem(
+                icon='images/globe.png',
+                name="Error",
+                description=str(e),
+                on_enter=CopyToClipboardAction(str(e))
+            ))
+        
+        return RenderResultListAction(items)
+
+    def fetch_international_rates(self):
+        """Fetch international exchange rates using a public API"""
+        try:
+            # Use a free exchange rate API (replace with your preferred API)
+            url = "https://open.er-api.com/v6/latest/USD"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("result") == "success":
+                return data.get("rates", {})
+            return None
+        except Exception as e:
+            print(f"Error fetching international rates: {str(e)}")
+            return None
+
+    def convert_international_currency(self, amount, from_currency, to_currency, rates):
+        """Convert between international currencies"""
+        # If rates are based on USD
+        if from_currency == "USD":
+            # Direct conversion from USD to target currency
+            return amount * rates.get(to_currency, 1)
+        elif to_currency == "USD":
+            # Convert to USD
+            return amount / rates.get(from_currency, 1)
+        else:
+            # Convert via USD
+            usd_amount = amount / rates.get(from_currency, 1)
+            return usd_amount * rates.get(to_currency, 1)
+
+    def get_international_trend_data(self, currency, period_days):
+        """Get trend data for international currency over a specified number of days"""
+        try:
+            # Calculate date range
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=period_days)
+            
+            # Initialize data structures
+            dates = []
+            rates = []
+            
+            # Fetch historical data
+            # Note: You'll need to use a service that provides historical data
+            # This is a simplified example using a free API
+            url = f"https://api.exchangerate.host/timeseries?start_date={start_date.strftime('%Y-%m-%d')}&end_date={end_date.strftime('%Y-%m-%d')}&base=USD&symbols={currency}"
+            response = requests.get(url, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            
+            if "rates" in data:
+                # Process the data
+                for date_str, rate_data in sorted(data["rates"].items()):
+                    if currency in rate_data:
+                        dates.append(date_str)
+                        rates.append(rate_data[currency])
+            
+            return {"dates": dates, "rates": rates}
+        except Exception as e:
+            print(f"Error fetching international trend data: {str(e)}")
+            return {"dates": [], "rates": []}
+
+    def generate_international_trend_chart(self, dates, rates, currency, period):
+        """Generate a chart for international trend data"""
+        # This function can be very similar to the original generate_trend_chart
+        # Just change the title and labels to reflect international data
+        
+        # Create a temporary directory if it doesn't exist
+        temp_dir = os.path.expanduser("~/.cache/ulauncher_eltoque")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Create a unique filename
+        filename = f"{temp_dir}/intl_{currency}_{period}_{int(time.time())}.png"
+        
+        try:
+            # Create the chart (similar to original chart code)
+            plt.figure(figsize=(10, 6))
+            
+            # Convert string dates to datetime objects
+            datetime_dates = [datetime.strptime(date, "%Y-%m-%d") for date in dates]
+            
+            # Plot the data
+            plt.plot(datetime_dates, rates, marker='o', linestyle='-', color='#1f77b4')
+            
+            # Set title and labels
+            plt.title(f"{currency} to USD International Exchange Rate Trend ({period})")
+            plt.xlabel("Date")
+            plt.ylabel(f"Rate (1 USD to {currency})")
+            plt.grid(True, linestyle='--', alpha=0.7)
+            
+            # Configure x-axis date formatting (same as original)
+            # ...
+            
+            plt.tight_layout()
+            
+            # Save the chart
+            plt.savefig(filename, dpi=100)
+            plt.close()
+            
+            return filename
+        except Exception as e:
+            print(f"Error generating international trend chart: {str(e)}")
+            return None
+
+    def handle_rate_comparison(self, query, extension):
+        """Compare ElToque rates with international market rates"""
+        items = []
+        
+        try:
+            # Get ElToque rates
+            eltoque_data = self.fetch_exchange_rates(extension, datetime.now().strftime("%Y-%m-%d"))
+            eltoque_rates = eltoque_data.get("tasas", {})
+            
+            # Get international rates
+            international_rates = self.fetch_international_rates()
+            
+            if not eltoque_rates or not international_rates:
+                items.append(ExtensionResultItem(
+                    icon='images/compare.png',
+                    name="Data Unavailable",
+                    description="Could not fetch data from one or both sources.",
+                    on_enter=CopyToClipboardAction("Data Unavailable")
+                ))
+                return RenderResultListAction(items)
+            
+            # Get USD to CUP rate from ElToque as reference
+            usd_cup_rate = eltoque_rates.get("USD", 1)
+            
+            # Check if a specific currency is requested
+            specific_currency = query.strip().upper() if query.strip() else None
+            
+            # Add header
+            items.append(ExtensionResultItem(
+                icon='images/compare.png',
+                name="Rate Comparison: ElToque vs International",
+                description=f"Reference: 1 USD = {usd_cup_rate:.2f} CUP",
+                on_enter=CopyToClipboardAction(f"Reference: 1 USD = {usd_cup_rate:.2f} CUP")
+            ))
+            
+            # Currencies to compare (use specific currency if provided)
+            currencies_to_compare = [specific_currency] if specific_currency else ["EUR", "MLC", "USDT_TRC20"]
+            
+            for currency in currencies_to_compare:
+                # Skip if currency not in ElToque rates
+                if currency not in eltoque_rates and currency != "EUR":
+                    continue
+                
+                # Handle EUR special case (ECU in ElToque)
+                eltoque_currency = "ECU" if currency == "EUR" else currency
+                
+                # Get ElToque rate
+                eltoque_rate = eltoque_rates.get(eltoque_currency, 0)
+                if eltoque_rate == 0:
+                    continue
+                
+                # Calculate ElToque USD equivalent
+                eltoque_usd_equivalent = eltoque_rate / usd_cup_rate
+                
+                # Get international rate (USD to Currency)
+                international_rate = 0
+                if currency == "EUR":
+                    international_rate = international_rates.get("EUR", 0)
+                elif currency == "USDT_TRC20":
+                    international_rate = 1  # USDT is pegged to USD
+                elif currency == "MLC":
+                    international_rate = 1  # MLC is theoretically 1:1 with USD
+                
+                # Skip if international rate is not available
+                if international_rate == 0:
+                    continue
+                
+                # Calculate difference
+                difference = eltoque_usd_equivalent - international_rate
+                difference_pct = (difference / international_rate) * 100 if international_rate != 0 else 0
+                
+                # Determine if ElToque rate is higher or lower
+                if difference > 0:
+                    comparison = "higher"
+                    icon = "images/up.png"
+                elif difference < 0:
+                    comparison = "lower"
+                    icon = "images/down.png"
+                else:
+                    comparison = "equal"
+                    icon = "images/flat.png"
+                
+                # Display name for currency
+                display_currency = extension.currency_names.get(eltoque_currency, currency)
+                
+                # Add comparison item
+                items.append(ExtensionResultItem(
+                    icon=icon,
+                    name=f"{display_currency}: ElToque vs International",
+                    description=f"ElToque: ${eltoque_usd_equivalent:.4f} | Int'l: ${international_rate:.4f} | Diff: {difference_pct:.2f}% {comparison}",
+                    on_enter=CopyToClipboardAction(f"{display_currency} - ElToque: ${eltoque_usd_equivalent:.4f} | International: ${international_rate:.4f} | Difference: {difference_pct:.2f}%")
+                ))
+            
+        except Exception as e:
+            items.append(ExtensionResultItem(
+                icon='images/compare.png',
+                name="Error",
+                description=str(e),
+                on_enter=CopyToClipboardAction(str(e))
+            ))
         
         return RenderResultListAction(items)
 
