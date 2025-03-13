@@ -10,7 +10,12 @@ Get real-time exchange rates from ElToque for Cuban currencies.
 
 ## Features
 
-- Fetches real-time exchange rates for Cuban currencies.
+- Fetches real-time exchange rates for Cuban currencies from ElToque.
+- Provides international exchange rates via Yahoo Finance.
+- Compares ElToque rates with international market rates.
+- Supports currency conversion for both Cuban and international currencies.
+- Generates trend charts for historical rate analysis.
+- Stores historical data locally for offline access.
 - Lightweight and easy to use.
 - Seamless integration with Ulauncher.
 
@@ -47,8 +52,26 @@ If you encounter errors during installation:
 ## Usage
 
 1. Open Ulauncher.
-2. Type the keyword you have set for this extension (default is `rate`).
-3. The extension will display the real-time exchange rates for Cuban currencies.
+2. Type the keyword you have set for this extension (default is `currency`).
+3. Choose from three main options:
+   - **ElToque Rates**: View Cuban exchange rates from ElToque
+   - **International Rates**: View international exchange rates via Yahoo Finance
+   - **Compare Rates**: Compare ElToque rates with international markets
+
+### ElToque Rates
+- View all current rates: Just type the keyword
+- Convert currencies: `100 USD to EUR`
+- Historical rates: `2024-03-01 100 USD to EUR` or `history 2024-03-01`
+- Trend analysis: `USD trend 7d` (supports 7d, 30d, 3m, 6m, 1y)
+
+### International Rates
+- View major currencies: `international`
+- Convert currencies: `international 100 USD to EUR`
+- Trend analysis: `international EUR trend 30d`
+
+### Compare Rates
+- Compare all currencies: `compare`
+- Compare specific currency: `compare EUR`
 
 ## Get Help
 ![image](https://github.com/user-attachments/assets/e2a45534-cb83-4cdd-bfa6-67151083da3c)

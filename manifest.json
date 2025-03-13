@@ -1,7 +1,7 @@
 {
   "required_api_version": "^2.0.0",
   "name": "ElToque Exchange Rates",
-  "description": "Get real-time exchange rates from ElToque for Cuban currencies",
+  "description": "Get real-time exchange rates from ElToque and international markets",
   "developer_name": "Hackroot",
   "icon": "images/icon.png",
   "options": {
